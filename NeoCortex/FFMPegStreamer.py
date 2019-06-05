@@ -44,7 +44,7 @@ class H264VideoStreamer:
     def connectMe(self):
         print "Openning single-client H264 streaming server:"+str(self.videoport)
 
-        self.pro = subprocess.Popen(['ffmpeg', '-f','avfoundation','-video_size','640x480','-i','0:none','-tune','zerolatency','-pix_fmt','yuv422p','-f','mpegts','udp://localhost:10000'],preexec_fn=os.setsid)
+        self.pro = subprocess.Popen(['ffmpeg', '-f','avfoundation','-framerate','20','-video_size','640x480','-i','0:none','-tune','zerolatency','-pix_fmt','yuv422p','-f','mpegts','udp://localhost:10000'],preexec_fn=os.setsid)
         if self.pro.stderr or self.pro.returncode:
             return False
 

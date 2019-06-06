@@ -31,8 +31,6 @@ class H264VideoStreamer:
         print 'Interrupting stream h264 server...'
         os.killpg(os.getpgid(self.pro.pid), signal.SIGTERM) 
         
-        if (self.thread):
-            self.thread.exit()
 
     def startAndConnect(self):
         try:
@@ -44,9 +42,14 @@ class H264VideoStreamer:
     def connectMe(self):
         print "Openning single-client H264 streaming server:"+str(self.videoport)
 
-        self.pro = subprocess.Popen(['ffmpeg', '-f','avfoundation','-framerate','20','-video_size','640x480','-i','0:none','-tune','zerolatency','-pix_fmt','yuv422p','-f','mpegts','udp://localhost:10000'],preexec_fn=os.setsid)
+        FNULL = open(os.devnull, 'w')
+        self.pro = subprocess.Popen(['ffmpeg', '-f','avfoundation','-framerate','20','-video_size','640x480','-i','0:none','-tune','zerolatency','-pix_fmt','yuv422p','-f','mpegts','udp://localhost:10000'],preexec_fn=os.setsid,stdout=FNULL,stderr=FNULL)
         if self.pro.stderr or self.pro.returncode:
             return False
+
+    def close(self):
+        self.keeprunning = False
+        self.interrupt()
 
     def connect(self):
 

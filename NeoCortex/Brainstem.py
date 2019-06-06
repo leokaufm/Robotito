@@ -36,7 +36,7 @@ else:
 
 import SensorimotorLogger as senso
 import MCast
-import Surrogator
+from Surrogator import SurrogatorClass
 
 import fcntl
 import struct
@@ -57,11 +57,15 @@ runningtoken.close()
 
 def get_ip_address(ifname):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    return socket.inet_ntoa(fcntl.ioctl(
-        s.fileno(),
-        0x8915,  # SIOCGIFADDR
-        struct.pack('256s', ifname[:15])
-    )[20:24])
+    try:
+        ip = socket.inet_ntoa(fcntl.ioctl(
+            s.fileno(),
+            0x8915,  # SIOCGIFADDR
+            struct.pack('256s', ifname[:15])
+        )[20:24])
+        return ip
+    except:
+        return ''
 
 
 # Get PiCamera stream and read everything in another thread.
@@ -82,7 +86,7 @@ def doserial():
     mtrn=None
     while (retries<5):
         try:
-            [ssmr, mtrn] = prop.serialcomm()
+            [ssmr, mtrn] = prop.serialcomm('/dev/cu.usbserial-1430')
             print 'Connection established'
             return [ssmr, mtrn]
         except Exception as e:
@@ -202,7 +206,7 @@ if (mtrn):
     motorneuron.cleanbuffer(mtrn)
 
 
-sur = Surrogator(sock)
+sur = SurrogatorClass(sock)
 
 #try:
 #    thread.start_new_thread( sur.hookme, () )
@@ -211,7 +215,7 @@ sur = Surrogator(sock)
 #    pass
 
 target = [0,1,0]
-automode = False;
+automode = False
 
 fps = Fps()
 fps.tic()
@@ -458,7 +462,7 @@ while(True):
         if (ssmr != None):
             ssmr.write('C')
 
-vst.keeprunning = False
+vst.close()
 sur.keeprunning = False
 time.sleep(2)
 

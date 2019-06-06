@@ -3,7 +3,7 @@
 #
 # Helps to receive commands.
 
-class Surrogator:
+class SurrogatorClass:
     def __init__(self, sock):
         print 'Remote controlling ShinkeyBot'
         self.data = ''

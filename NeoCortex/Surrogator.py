@@ -2,10 +2,9 @@
 #!/usr/bin/env python3
 #
 # Helps to receive commands.
-
-class SurrogatorClass:
+class Surrogator:
     def __init__(self, sock):
-        print 'Remote controlling ShinkeyBot'
+        print ('Remote controlling ShinkeyBot')
         self.data = ''
         self.message = ''
         self.controlvalue = 0
@@ -17,34 +16,26 @@ class SurrogatorClass:
     def getdata(self):
         return self.data
 
-    def getlengthycommand(self,length):
-        self.data = ''
-        try:
-            # Read from the UDP controller socket non blocking
-            self.data, self.address = self.sock.recvfrom(length)
-        except Exception as e:
-            pass
-
-        return self.data
-
     def getcommand(self):
         self.data = ''
         try:
             # Read from the UDP controller socket non blocking
             self.data, self.address = self.sock.recvfrom(1)
-        except Exception as e:
+        except Exception:
             pass
 
     def getmessage(self):
         self.data = ''
+        self.command = ''
         try:
             # Read from the UDP controller socket non blocking
             # The message format is AANNN
             self.message, self.address = self.sock.recvfrom(5)
-            self.command = self.message[0]
-            self.data = self.message[1]
+            self.command = chr(int(self.message[0]))
+            self.data = chr(int(self.message[1]))
+            #print('Data', self.data)
             self.controlvalue = int(self.message[2:5])
-        except Exception as e:
+        except Exception:
             pass
 
 
@@ -56,4 +47,4 @@ class SurrogatorClass:
             if (self.data == 'X'):
                 break
 
-        print 'Stopping surrogate...'
+        print ('Stopping surrogate...')

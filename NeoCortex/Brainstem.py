@@ -1,51 +1,30 @@
-#coding: latin-1
-
-# NeoCortex is the core program to control ShinkeyBot
-# It handles basic USB-Serial comm with other modules and handles
-# the basic operation of ShinkeyBot
-#
-# x) Transmit TCP/IP images through CameraStreamer.
-# x) Captures sensor data from SensorimotorLogger
-# x) Handles output to motor unit and sensorimotor commands through Proprioceptive
-# x) Receives high-level commands from ShinkeyBotController.
-
-import numpy as np
-import cv2
-
+import Configuration
 import serial
-
 import time
 import datetime
 from struct import *
-
-import sys, os, select
-
-import socket
-
-import Proprioceptive as prop
-import thread
-#import PicameraStreamer as pcs
-import os
-import sys
-import platform
-system_platform = platform.system()
-if system_platform == "Darwin":
-    import FFMPegStreamer as pcs
-else:
-    import H264Streamer as pcs
-
-import SensorimotorLogger as senso
-import MCast
-from Surrogator import SurrogatorClass
-
-import fcntl
 import struct
+import sys, os, select
+import socket
+import fcntl
+from threading import Timer
+import signal
+import time
+import subprocess
+
+from connection import MCast
+from SerialConnection import SerialConnection
+from motor.MotorCortex import MotorCortex
+from sensors.SensorimotorCortex import SensorimotorCortex
 
 from Fps import Fps
 
-# First create a witness token to guarantee only one instance running
+from Surrogator import Surrogator
+
+# --- Disabling this for now, it was giving me some headaches
+# First create a witness token to guarantee only one instance running
 if (os.access("running.wt", os.R_OK)):
-    print >> sys.stderr, 'Another instance is running. Cancelling.'
+    print('Another instance is running. Cancelling.')
     quit(1)
 
 runningtoken = open('running.wt', 'w')
@@ -58,61 +37,22 @@ runningtoken.close()
 def get_ip_address(ifname):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        ip = socket.inet_ntoa(fcntl.ioctl(
-            s.fileno(),
-            0x8915,  # SIOCGIFADDR
-            struct.pack('256s', ifname[:15])
-        )[20:24])
-        return ip
+        # doesn't even have to be reachable
+        s.connect(('10.255.255.255', 1))
+        IP = s.getsockname()[0]
     except:
-        return ''
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
 
-
-# Get PiCamera stream and read everything in another thread.
-vst = pcs.H264VideoStreamer()
-try:
-    vst.startAndConnect()
-    pass
-except:
-    pass
-
-
-# Open connection to tilt sensor (@deprecated)
-#hidraw = prop.setupsensor()
-# Open serial connection to MotorUnit and Sensorimotor Arduinos.
-def doserial():
-    retries=1
-    ssmr=None
-    mtrn=None
-    while (retries<5):
-        try:
-            [ssmr, mtrn] = prop.serialcomm('/dev/cu.usbserial-1430')
-            print 'Connection established'
-            return [ssmr, mtrn]
-        except Exception as e:
-            print 'Error while establishing serial connection.'
-            retries=retries+1
-
-    return [ssmr, mtrn]
-
-[ssmr, mtrn] = doserial()
-
-# Instruct the Sensorimotor Cortex to stop wandering.
-ssmr.write('C')
-ssmr.write('B')
-time.sleep(1)
-ssmr.write('B')
-
-# Ok, so the first thing to do is to broadcast my own IP address.
-dobroadcastip = True
-
-# Initialize UDP Controller Server on port 10001 (ShinkeyBotController)
+# Initialize UDP Controller Server on port 10001 (BotController)
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 server_address = ('0.0.0.0', 10001)
-print >> sys.stderr, 'Starting up Controller Server on %s port %s', server_address
+print('Starting up Controller Server on '+server_address[0])
 sock.bind(server_address)
 
-if (dobroadcastip):
+if (Configuration.broadcast_IP):
     sock.setblocking(0)
     sock.settimeout(0.01)
 
@@ -126,352 +66,251 @@ if (len(myip)>0):
 else:
     myip = 'None'
 
-# Shinkeybot truly does nothing until it gets connected to ShinkeyBotController
-whenistarted = time.time()
-print 'Multicasting my own IP address:' + myip
-while dobroadcastip:
+start = time.time()
+print('Multicasting my own IP address: ' + myip)
+while Configuration.broadcast_IP:
     noticer.send()
     try:
         data, address = sock.recvfrom(1)
-        if (len(data)>0):
+        if (len(data) > 0):
             break
     except:
         data = None
 
-    if (abs(time.time()-whenistarted)>60):
-        print 'Giving up broadcasting ip... Lets get started.'
+    if (abs(time.time()- start) > 20):
+        print('Giving up broadcasting ip... Lets get started.')
         break
 
-from threading import Timer
-
 def timeout():
-    print 'Sending a multicast update of my own ip address:'+myip
+    print ('Sending a multicast update of my own ip address:'+myip)
     noticer.send()
 
-t = Timer(1 * 30, timeout)
-t.start()
-
-if (dobroadcastip):
+if (Configuration.broadcast_IP):
     sock.setblocking(1)
     sock.settimeout(0)
 
-print 'Connection to Remote Controller established.'
 
+import platform
+system_platform = platform.system()
+if system_platform == "Darwin":
+    import FFMPegStreamer as pcs
+    portname='/dev/cu.usbmodem146101'
+else:
+    import H264Streamer as pcs
+    portname = None
 
-def terminateme():
+dosomestreaming = True
+
+# Get PiCamera stream and read everything in another thread.
+vst = pcs.H264VideoStreamer()
+if (dosomestreaming):
     try:
-        t.cancel()
-        print 'Thread successfully closed.'
+        if system_platform == "Darwin":
+            vst.startAndConnect()
+        else:
+            vst.spanAndConnect()
+        pass
     except Exception as e:
-        print 'Exception while closing video stream thread.'
-        traceback.print_exc(file=sys.stdout)
-
-    os.remove('running.wt')
-    print 'ShinkeyBot has stopped.'
+        print('Error starting H264 stream thread:'+str(e))
 
 
-if (ssmr == None and mtrn == None):
-    terminateme()
-
-
-tgt = -300
-
-wristpos=90
-elbowpos = 90
-shoulderpos = 150
-pitpos = 150
-
-# Pan and tilt
-visualpos = [90,95]
-
+visualpos = [90, 95]
 scan = 90
-
 # Enables the sensor telemetry.  Arduinos will send telemetry data that will be
 #  sent to listening servers.
 sensesensor = False
 
-# Connect remotely to any client that is waiting for sensor loggers.
-sensorimotor = senso.Sensorimotor('sensorimotor',66,'fffffffffffhhhhhhhhhhh')
-sensorimotor.start()
-sensorimotor.init(ssmr)
-sensorimotor.sensorlocalburst=100
-sensorimotor.sensorburst=10
-sensorimotor.updatefreq=5
-sensorimotor.cleanbuffer(ssmr)
-
-if (mtrn):
-    motorneuron = senso.Sensorimotor('motorneuron',26,'hhffffhhh')
-    motorneuron.start()
-    sensorimotor.init(mtrn)
-    motorneuron.cleanbuffer(mtrn)
-
-
-sur = SurrogatorClass(sock)
-
-#try:
-#    thread.start_new_thread( sur.hookme, () )
-#    pass
-#except:
-#    pass
-
-target = [0,1,0]
-automode = False
+sur = Surrogator(sock)
 
 fps = Fps()
 fps.tic()
 
 ts = time.time()
 st = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d-%H-%M-%S')
-runninglog = open('../data/brainstem.'+st+'.dat', 'w')
+
+connection = SerialConnection(portname=portname)
+motor = MotorCortex(connection = connection)
+# Connect remotely to any client that is waiting for sensor loggers.
+sensorimotor = SensorimotorCortex(connection,'sensorimotor',24)
+sensorimotor.init()
+sensorimotor.start()
+sensorimotor.sensorlocalburst=1000
+sensorimotor.sensorburst=100
+sensorimotor.updatefreq=10
+sensorimotor.cleanbuffer()
+
+connection.send(b'AE010')
+connection.send(b'AB100')
+
+def terminate():
+    print('Stopping ShinkeyBot')
+    
+    try:
+        motor.stop()
+    finally:
+        os.remove('running.wt')
+
+    print ('ShinkeyBot has stopped.')
+    exit(0)
+
+signal.signal(signal.SIGINT, lambda signum, frame: terminate())
+signal.signal(signal.SIGTERM, lambda signum, frame: terminate())
+
+print('ShinkeyBot ready.')
+# Beeping !!!!
+connection.send(b'B')
 
 # Live
 while(True):
     try:
         fps.steptoc()
         ts = int(time.time())
-        runninglog.write(str(ts) + ',' + str(fps.fps) + '\n')
+        #runninglog.write(str(ts) + ',' + str(fps.fps) + '\n')
         #print "Estimated frames per second: {0}".format(fps.fps)
         data = ''
         # TCP/IP server is configured as non-blocking
         sur.getmessage()
-        data, address = sur.data, sur.address
+
+        cmd = sur.command
+        cmd_data, address = sur.data, sur.address
 
         # If someone asked for it, send sensor information.
         if (sensesensor):
-            sens = sensorimotor.picksensorsample(ssmr)
-            mots = None
-
-            if (mtrn):
-                mots = motorneuron.picksensorsample(mtrn)
-
-            if (sens != None and mots != None):
-                # FIX HERE CHECK WHERE TO PUT THE VALUE
-                sensorimotor.repack([10],[fps.fps])
-                sensorimotor.send(sensorimotor.data+motorneuron.data)
+            sens = sensorimotor.picksensorsample()
 
             if (sens != None):
+                # Check where to put the value
                 sensorimotor.repack([10],[fps.fps])
                 sensorimotor.send(sensorimotor.data)
 
-            if (sens != None and target != None):
-                if (target[0] == 0):
-                    target = sens[9], sens[10], sens[11]
+        #if (cmd_data != ''):
+        #    print(cmd)
+        #    print(cmd_data)
 
-                if (automode):
-                    #print "Moving to :" + str(target[0]) + '\t' + str(target[1]) + '\t' + str(target[2])
-                    #print "From:     :" + str(sens[9])   + '\t' + str(sens[10])  + '\t' + str(sens[11])
-                    #if (not ( abs(sens[9]-target[0])<10) ):
-                    #    ssmr.write('-')
-                    #    ssmr.write('4')
-                    #    time.sleep(0.2)
-                    #    ssmr.write('5')
-                    #    time.sleep(0.1)
-
-                    print 'Auto:Sensing distance:'+str(sens[15])
-                    ssmr.write('+')
-                    ssmr.write('2')
-                    if (sens[15]<90):
-                        ssmr.write('5')
-        if (sur.command == 'A'):
+        if (cmd == 'A'):
             if (len(sur.message)==5):
                 # Sending the message that was received.
-                ssmr.write(sur.message)
+                print(sur.message)
+                connection.send(sur.message)
                 sur.message = ''
 
-        elif (sur.command == 'U'):
-
-            if (data == '!'):
+        elif (cmd == 'U'):
+            # Activate/Deactivate sensor data.
+            if (cmd_data == '!'):
                 # IP Address exchange.
                 sensorimotor.ip = address[0]
                 sensorimotor.restart()
 
-                if (mtrn):
-                    motorneuron.ip = address[0]
-                    motorneuron.restart()
-
-                print "Reloading target ip for telemetry:"+sensorimotor.ip
-
-                # Vst VideoStream should be likely restarted in order to check
-                # if something else can be enabled.
-
-
-            if (data == 'Q'):
-                # Activate/Deactivate sensor data.
+                print ("Reloading target ip for telemetry:"+sensorimotor.ip)          
+            
+            elif (cmd_data == 'Q'):
                 sensesensor = True
-            elif (data == 'q'):
+            elif (cmd_data == 'q'):
                 sensesensor = False
-            if (data == 'K'):
-                #Scan
-                ssmr.write('K')
-            if (data == 'N'):
-                ssmr.write('H')
+
+
+            if (cmd_data == 'N'):
+                motor.connection.send(b'H')
                 #Camera Right
-            elif (data == 'B'):
-                ssmr.write('G')
+            elif (cmd_data == 'B'):
+                motor.connection.send(b'G')
                 #Camera Center
                 visualpos = [90,95]
-            elif (data == 'V'):
-                ssmr.write('F')
+            elif (cmd_data == 'V'):
+                motor.connection.send(b'F')
                 #Camera Left
-            elif (data == 'C'):
-                ssmr.write('T')
+            elif (cmd_data == 'C'):
+                motor.connection.send(b'T')
                 #Camera nose down
-            elif (data == '='):
-                #Home position.
-                mtrn.write('=')
-                wristpos=90
-                elbowpos=90
-                pitpos = 150
-                shoulderpos=150
-            elif (data == '$'):
-                pitpos = pitpos + 1
-                mtrn.write('AC'+'{:3d}'.format(pitpos))
-            elif (data == '%'):
-                pitpos = pitpos - 1
-                mtrn.write('AC'+'{:3d}'.format(pitpos))
-            elif (data == 'Y'):
-                # Move shoulder up
-                shoulderpos = shoulderpos + 1
-                mtrn.write('A7'+'{:3d}'.format(shoulderpos))
-            elif (data == 'H'):
-                # Move shoulder down.
-                shoulderpos = shoulderpos - 1
-                mtrn.write('A7'+'{:3d}'.format(shoulderpos))
-            elif (data=='<'):
-                # Move elbows up (by increasing its torque)
-                elbowpos = elbowpos + 1
-                mtrn.write('AA'+'{:3d}'.format(elbowpos))
-            elif (data=='>'):
-                # Move elbows dow (by decreasing its torque)
-                elbowpos = elbowpos - 1
-                mtrn.write('AA'+'{:3d}'.format(elbowpos))
-            elif (data=='Z'):
-                # Reset Elbow position (no force)
-                elbowpos = 90
-                mtrn.write('AA'+'{:3d}'.format(elbowpos))
-            elif (data=='J'):
-                # mtrn.write('A6180')
-                wristpos = wristpos + 1
-                mtrn.write('A6'+'{:3d}'.format(wristpos))
-                # wrist Up
-            elif (data=='j'):
-                # mtrn.write('A6090')
-                wristpos = wristpos - 1
-                mtrn.write('A6'+'{:3d}'.format(wristpos))
-                # wrist down
-            elif (data=='\''):
-                # Wrist clockwise
-                mtrn.write('A8120')
-            elif (data=='?'):
-                # Wrist anticlockwise
-                mtrn.write('A9120')
-            elif (data=='G'):
-                # Grip close
-                mtrn.write('A1220')
-            elif (data=='R'):
-                # Grip open
-                mtrn.write('A2200')
-                # Gripper Release
-            elif (data==' '):
-                ssmr.write('1')
-                # Quiet
-            elif (data=='W'):
-                ssmr.write('2')
-                # Forward
-            elif (data=='S'):
-                ssmr.write('3')
-                # Backward
-            elif (data=='D'):
-                ssmr.write('4')
-                # Right
-            elif (data=='A'):
-                ssmr.write('5')
-                # Left
-            elif (data=='.'):
-                ssmr.write('-')
-                # Move slowly
-            elif (data==','):
-                ssmr.write('+')
-                # Move coarsely
-            elif (data=='L'):
-                mtrn.write('L')
-                ssmr.write('L')
+
+
+
+
+
+            elif (cmd_data=='L'):
+                motor.connection.send(b'L')
+                motor.connection.send(b'L')
                 # Laser on
-            elif (data=='l'):
-                mtrn.write('l')
-                ssmr.write('l')
+            elif (cmd_data=='l'):
+                motor.connection.send(b'l')
+                motor.connection.send(b'l')
                 # Laser off
-            elif (data=='+'):
-                tgt = tgt + 100
-                # Pull up tesaki target
-            elif (data=='-'):
-                tgt = tgt - 100
-                # Pull down tesaki target
-            elif (data=='{'):
+            elif (cmd_data=='{'):
                 # Camera left
                 visualpos[0]=visualpos[0]+1;
-                ssmr.write('AF'+'{:3d}'.format(visualpos[0]))
-            elif (data=='}'):
+                motor.connection.send(bytes('AF'+'{:3d}'.format(visualpos[0]),'ascii'))
+            elif (cmd_data=='}'):
                 # Camera right
                 visualpos[0]=visualpos[0]-1;
-                ssmr.write('AF'+'{:3d}'.format(visualpos[0]))
-            elif (data=='['):
+                motor.connection.send(bytes('AF'+'{:3d}'.format(visualpos[0]),'ascii'))
+            elif (cmd_data=='['):
                 # Nose down
                 visualpos[1]=visualpos[1]-1;
-                ssmr.write('AT'+'{:3d}'.format(visualpos[1]))
-            elif (data==']'):
+                motor.connection.send(bytes('AT'+'{:3d}'.format(visualpos[1]),'ascii'))
+            elif (cmd_data==']'):
                 # Nose up
                 visualpos[1]=visualpos[1]+1;
-                ssmr.write('AT'+'{:3d}'.format(visualpos[1]))
-            elif (data=='a'):
+                motor.connection.send(bytes('AT'+'{:3d}'.format(visualpos[1]),'ascii'))
+            elif (cmd_data=='a'):
                 # Scan right
-                scan=scan-1;
-                ssmr.write('AO'+'{:3d}'.format(scan))
-            elif (data=='d'):
-                # Scan left
                 scan=scan+1;
-                ssmr.write('AO'+'{:3d}'.format(scan))
-            elif (data=='M'):
+                motor.connection.send(bytes('AO'+'{:3d}'.format(scan),'ascii'))
+            elif (cmd_data=='d'):
+                # Scan left
+                scan=scan-1;
+                motor.connection.send(bytes('AO'+'{:3d}'.format(scan),'ascii'))
+            elif (cmd_data=='M'):
                 pass
                 #prop.moveto(mtrn, hidraw, tgt)
                 # PID to desired position
-            elif (data=='E'):
-                ssmr.write('E')
+            elif (cmd_data=='E'):
+                motor.connection.send(b'E')
                 # Empire song
-            elif (data=='P'):
-                ssmr.write('B')
-                # Buzz
-            elif (data=='('):
-                sensorimotor.sensorlocalburst = 100
-            elif (data==')'):
-                sensorimotor.sensorlocalburst = 10000
-            elif (data=='O'):
-                ssmr.write('O')
-            elif (data=='X'):
+            elif (cmd_data=='P'):
+                # Beep
+                motor.connection.send(b'B')
+
+            elif (cmd_data=='p'):
+                # Get barometric data
+                motor.connection.send(b'P')
+            elif (cmd_data=='O'):
+                # Do the ultrasound sensor scan
+                motor.connection.send(b'O')
+            elif (cmd_data == 'K'):
+                #IMU sensor readings
+                motor.connection.send(b'K')
+
+            elif (cmd_data == ' '):
+                motor.stop()
+
+            elif (cmd_data == 'W'):
+                motor.move_forward()
+            elif (cmd_data == 'S'):
+                motor.move_backwards()
+            elif (cmd_data == 'D'):
+                motor.move_right()
+            elif (cmd_data == 'A'):
+                motor.move_left()
+            elif (cmd_data == '.'):
+                motor.decrease_speed()
+            elif (cmd_data == ','):
+                motor.increase_speed()
+            elif (cmd_data == 'X'):
                 break
     except Exception as e:
-        print "Error:" + e.message
-        print "Waiting for serial connection to reestablish..."
-        if (not ssmr == None):
-            ssmr.close()
-        if (not mtrn == None):
-            mtrn.close()
-        [ssmr, mtrn] = doserial()
+        print ("Error:" + str(e))
+        print ("Waiting for serial connection to reestablish...")
+        connection.reconnect()
 
         # Instruct the Sensorimotor Cortex to stop wandering.
-        if (ssmr != None):
-            ssmr.write('C')
+        sensorimotor.reset()
 
-vst.close()
+    sys.stdout.flush() # for service to print logs
+
+vst.keeprunning = False
+vst.interrupt()
 sur.keeprunning = False
-time.sleep(2)
 
-
-#When everything done, release the capture
-if (not ssmr == None):
-    ssmr.close()
+# When everything done, release the capture
 sock.close()
-if (not mtrn == None):
-    mtrn.close()
-
-terminateme()
+terminate()

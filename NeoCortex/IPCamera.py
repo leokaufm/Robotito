@@ -14,7 +14,7 @@ import io
 
 import os
 
-savevideo = True
+savevideo = False
 
 if (len(sys.argv)<2):
 	# Load the configuration file
@@ -22,16 +22,13 @@ if (len(sys.argv)<2):
 	port = conf.videoport
 
 elif sys.argv[1] == '-f':
-	print "Forcing IP Address"
+	print ("Forcing IP Address")
 	ip = '192.168.0.110'
 	port = 10000
 else:
 	ip = sys.argv[1]
-	print "Using IP:"+ip
-	if (len(sys.argv)==3):
-		port = int(sys.argv[2])
-	else:
-		port = 10000
+	print ("Using IP:"+ip)
+	port = 10000
 
 
 #cap = cv2.VideoCapture(0)
@@ -45,12 +42,12 @@ else:
 cap = cv2.VideoCapture('udp://localhost:10000')
 
 if (savevideo):
-	w = cap.get(cv2.CAP_PROP_FRAME_WIDTH);
-	h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT);
+	w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+	h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 	fourcc = cv2.VideoWriter_fourcc(*"MJPG")
 	ts = time.time()
 	st = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d-%H-%M-%S')
-	out = cv2.VideoWriter('../data/output.'+st+'.avi',fourcc, 24.0, (int(w),int(h)))
+	out = cv2.VideoWriter('./data/output.'+st+'.avi',fourcc, 24.0, (int(w),int(h)))
 
 print ("Connecting..")
 
@@ -73,7 +70,7 @@ def hough(frame):
     lines = cv2.HoughLinesP(edges,1,np.pi/180,100,minLineLength,maxLineGap)
     for x1,y1,x2,y2 in lines[0]:
         cv2.line(frame,(x1,y1),(x2,y2),(0,255,0),2)
-	return frame
+    return frame
 
 
 
@@ -84,19 +81,16 @@ for i in range(1,80000):
 	#frame = cv2.flip(frame,0)
 	#frame = cv2.flip(frame,1)
 
-	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+	#gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	#cv2.imwrite('01.png', gray)
 
-	if (False):
-		#Using AKAZE descriptors.
-		detector = cv2.AKAZE_create()
-		(kps, descs) = detector.detectAndCompute(gray, None)
+	#Using AKAZE descriptors.
+	#detector = cv2.AKAZE_create()
+	#(kps, descs) = detector.detectAndCompute(gray, None)
+	#print("keypoints: {}, descriptors: {}".format(len(kps), descs.shape))
 
-		if (len(kps)>0):
-			print("keypoints: {}, descriptors: {}".format(len(kps), descs.shape))
-
-			# draw the keypoints and show the output image
-			cv2.drawKeypoints(frame, kps, frame, (0, 255, 0))
+	# draw the keypoints and show the output image
+	#cv2.drawKeypoints(frame, kps, frame, (0, 255, 0))
 
 	#edges = cv2.Canny(frame,100,200)
 	#edges = cv2.Canny(frame,50,150,apertureSize = 3)
@@ -132,6 +126,7 @@ print ('Done.')
 cap.release()
 time.sleep(5)
 
-out.release()
+if (savevideo):
+	out.release()
 
 cv2.destroyAllWindows()

@@ -6,7 +6,7 @@ from struct import *
 import struct
 import sys, os, select
 import socket
-import fcntl
+# import fcntl
 from threading import Timer
 import signal
 import time
@@ -72,12 +72,13 @@ while Configuration.broadcast_IP:
     noticer.send()
     try:
         data, address = sock.recvfrom(1)
+        print(f"data, address: {data}, {address}")
         if (len(data) > 0):
             break
     except:
         data = None
 
-    if (abs(time.time()- start) > 20):
+    if (abs(time.time()- start) > 100):
         print('Giving up broadcasting ip... Lets get started.')
         break
 
@@ -102,16 +103,16 @@ else:
 dosomestreaming = True
 
 # Get PiCamera stream and read everything in another thread.
-vst = pcs.H264VideoStreamer()
-if (dosomestreaming):
-    try:
-        if system_platform == "Darwin":
-            vst.startAndConnect()
-        else:
-            vst.spanAndConnect()
-        pass
-    except Exception as e:
-        print('Error starting H264 stream thread:'+str(e))
+# vst = pcs.H264VideoStreamer()
+# if (dosomestreaming):
+#     try:
+#         if system_platform == "Darwin":
+#             vst.startAndConnect()
+#         else:
+#             vst.spanAndConnect()
+#         pass
+#     except Exception as e:
+#         print('Error starting H264 stream thread:'+str(e))
 
 
 visualpos = [90, 95]
@@ -307,8 +308,8 @@ while(True):
 
     sys.stdout.flush() # for service to print logs
 
-vst.keeprunning = False
-vst.interrupt()
+# vst.keeprunning = False
+# vst.interrupt()
 sur.keeprunning = False
 
 # When everything done, release the capture

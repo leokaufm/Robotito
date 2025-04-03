@@ -40,9 +40,11 @@ server_address = (ip, Configuration.controlport)
 def _find_getch():
     try:
         import termios
+        print("Imported termios")
     except ImportError:
         # Non-POSIX. Return msvcrt's (Windows') getch.
         import msvcrt
+        print("Imported msvcrt")
         return msvcrt.getch
 
     # POSIX system. Create and return a getch that manipulates the tty.
@@ -61,13 +63,15 @@ def _find_getch():
 
 getch = _find_getch()
 
-print('Press X to stop Bot')
+print('Press X to stop bot.')
 print('Press x to exit this controller')
 print('Press f to enter new update frequency for the bot.')
+print('Press c to send commands to the bot.')
 
 while (True):
   print ('>')
   data = getch()
+  print(f"data:{data}")
 
   if (data.startswith('x')):
       sock.close()

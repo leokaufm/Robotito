@@ -2,7 +2,7 @@
 
 import socket
 import time
-import picamera
+import picamera2
 import threading
 import subprocess
 import os
@@ -56,7 +56,7 @@ class H264VideoStreamer:
 
     def connectMe(self, server_socket):
         print ("Openning single-client H264 streaming server:"+str(self.videoport))
-        with picamera.PiCamera() as camera:
+        with picamera2.Picamera2() as camera:
             camera.resolution = (640, 480)
             camera.framerate = 10
             camera.hflip = True
@@ -108,4 +108,4 @@ if __name__ == "__main__":
     vd = H264VideoStreamer()
     vd.startAndConnect()
 
-    input()
+    # input()
